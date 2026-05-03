@@ -62,7 +62,7 @@ export default function AnalyzePage() {
     formData.append('file', file);
 
     try {
-      const res = await fetch('http://localhost:3000/analyze', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/analyze`, {
         method: 'POST',
         body: formData,
         headers: {

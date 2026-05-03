@@ -32,7 +32,7 @@ export default function ProgressSteps({ sessionId, isActive }) {
   useEffect(() => {
     if (!sessionId || !isActive) return;
 
-    const es = new EventSource(`http://localhost:3000/analyze/progress/${sessionId}`);
+    const es = new EventSource(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/analyze/progress/${sessionId}`);
     
     es.onmessage = (event) => {
       try {
