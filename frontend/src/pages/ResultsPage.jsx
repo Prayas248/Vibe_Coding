@@ -7,7 +7,7 @@ export default function ResultsPage() {
   const navigate = useNavigate();
   const [expandedJournal, setExpandedJournal] = useState(0);
 
-  const rawResult = sessionStorage.getItem(`vibe_result_${id}`);
+  const rawResult = sessionStorage.getItem(`orbis_result_${id}`);
   const result = rawResult ? JSON.parse(rawResult) : null;
 
   if (!result || !result.topJournals || !Array.isArray(result.topJournals)) {

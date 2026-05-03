@@ -25,59 +25,29 @@ export class AnalysisService {
       return this.getFallbackAnalysis();
     }
 
-    const prompt = `
-You are an expert research scientist and program committee reviewer for top-tier venues such as NeurIPS, ICML, and ACL. 
-Analyze the paper abstract below and determine its true research nature. 
-Identify whether it is foundational (new paradigm), incremental (improving existing work), application-based, or survey-based.
-
-Return your response STRICTLY in JSON format with the following fields:
+    const prompt = `Analyze this research abstract as a top-tier venue reviewer. Return STRICTLY JSON:
 {
-  "paper_type": "foundational" | "incremental" | "application" | "survey",
-  "novelty_score": 0-1,
-  "novelty_label": "low" | "medium" | "high" | "breakthrough",
-  "impact_potential": 0-1,
-  "confidence": 0-1,
-  "signals": {
-    "paradigm_shift": boolean,
-    "novelty_similarity_gap": 0-1
-  },
-  "contribution_vector": {
-    "architecture": 0-1,
-    "theory": 0-1,
-    "application": 0-1,
-    "benchmarking": 0-1
-  }, // MUST SUM TO 1.0. Give the primary contribution type the highest value.
-  "reviewer_sentiment": {
-    "positive": 0-1,
-    "skepticism": 0-1
-  },
-  "risk_factors": [
-    { "type": "string", "severity": 0-1, "description": "string" }
-  ],
+  "paper_type": "foundational"|"incremental"|"application"|"survey",
+  "novelty_score": 0-1, "novelty_label": "low"|"medium"|"high"|"breakthrough",
+  "impact_potential": 0-1, "confidence": 0-1,
+  "signals": {"paradigm_shift": bool, "novelty_similarity_gap": 0-1},
+  "contribution_vector": {"architecture": 0-1, "theory": 0-1, "application": 0-1, "benchmarking": 0-1},
+  "reviewer_sentiment": {"positive": 0-1, "skepticism": 0-1},
+  "risk_factors": [{"type": "str", "severity": 0-1, "description": "str"}],
   "risk_score": 0-1,
-  "venue_strategy": {
-    "recommended_tier": "elite" | "mid-tier" | "broad",
-    "override_similarity": boolean,
-    "reasoning": "string"
-  },
-  "final_recommendation": {
-    "submission_readiness": "low_fit" | "moderate_fit" | "high_fit" | "high_potential_high_risk",
-    "confidence_in_acceptance": 0-1
-  },
-  "key_contribution_summary": "one sentence",
+  "venue_strategy": {"recommended_tier": "elite"|"mid-tier"|"broad", "override_similarity": bool, "reasoning": "str"},
+  "final_recommendation": {"submission_readiness": "low_fit"|"moderate_fit"|"high_fit"|"high_potential_high_risk", "confidence_in_acceptance": 0-1},
+  "key_contribution_summary": "1 sentence",
   "reviewer_explanation": "2-3 sentences"
 }
+contribution_vector MUST sum to 1.0.
 
 Abstract:
-${abstract}
-`;
+${abstract.slice(0, 800)}`;
 
     try {
       for (const model of [
         'llama-3.3-70b-versatile',
-        'llama-3.1-70b-versatile',
-        'mixtral-8x7b-32768',
-        'qwen-qwq-32b',
       ]) {
         try {
           console.log(`[AI] trying groq/${model}`);

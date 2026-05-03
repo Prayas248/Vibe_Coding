@@ -207,13 +207,13 @@ export class ScoringService {
           journal.abstracts.map(text => EmbeddingService.getEmbedding(text))
         );
 
-        // Find top 6 most relevant historical papers to define this venue's specific context for the user paper
+        // Find top 8 most relevant historical papers to define this venue's specific context for the user paper
         const sims = abstractEmbeddings.map(emb => ({
           emb,
           score: cosineSimilarity(abstractEmbedding, emb)
         })).sort((a, b) => b.score - a.score);
 
-        const topN = Math.min(6, sims.length);
+        const topN = Math.min(8, sims.length);
         const topSims = sims.slice(0, topN);
 
         // Construct Venue-Level Embedding (Centroid of top matches)
@@ -230,11 +230,14 @@ export class ScoringService {
 
         // Compute focusScore: Mean similarity between individual papers and their centroid.
         // High score = Narrow/Focused (papers are tight around centroid), Low score = Broad/Diverse.
-        let sumSimToCentroid = 0;
-        for (const item of topSims) {
-          sumSimToCentroid += cosineSimilarity(item.emb, venueVector);
+        // Requires at least 3 papers for a meaningful focusScore; otherwise skip.
+        if (topN >= 3) {
+          let sumSimToCentroid = 0;
+          for (const item of topSims) {
+            sumSimToCentroid += cosineSimilarity(item.emb, venueVector);
+          }
+          journal.focusScore = sumSimToCentroid / topN;
         }
-        journal.focusScore = sumSimToCentroid / topN;
 
         // Primary Signal: Direct similarity between user paper and aggregated venue identity
         const venueSimilarity = cosineSimilarity(abstractEmbedding, venueVector);
@@ -253,19 +256,17 @@ export class ScoringService {
       const keywordOverlap = await calculateSemanticKeywordMatch(extractedFeatures.keywords, journal.keywords);
 
       // 3. Domain Match (Used as a qualifier)
-      const domainMatch = calculateDomainMatch(extractedFeatures.domain, journal.domain);
+      const domainMatch = calculateDomainMatch(extractedFeatures.domain, journal.domain, journal.keywords, journal.name);
+      logger.info(`[DOMAIN-DEBUG] ${journal.name} | paperDomain: "${extractedFeatures.domain}" | journalDomain: "${journal.domain}" | domainMatch: ${domainMatch.toFixed(2)}`);
 
       // Stable Hybrid Score: 85% Semantic, 15% Keyword (Prioritizing true topical alignment)
       let rawScore = ((0.85 * semanticScore) + (0.15 * keywordOverlap));
 
-      // --- NEW: Specialization Boost ---
+      // --- Specialization Boost ---
       // Reward specialized journals over broad mega-journals (Nature, PLoS ONE, Science)
-      // `focusScore` measures how tightly clustered the venue's papers are around its centroid.
-      // High focusScore = Niche/Specialized. Low focusScore = Broad/Mega-journal.
-      if (journal.focusScore) {
-        // focusScore typically ranges from 0.4 (broad) to 0.8+ (highly specialized)
-        // Normalize it to a multiplier between 0.90 and 1.30
-        const specializationMultiplier = 0.90 + (journal.focusScore * 0.5); 
+      // Tightened range: 0.97-1.10 to prevent specialization from overriding semantic fit
+      if (journal.focusScore && journal.focusScore < 0.99) {
+        const specializationMultiplier = 0.97 + (journal.focusScore * 0.15);
         rawScore *= specializationMultiplier;
         logger.info(`[SPECIALIZATION-BOOST] ${journal.name} | focusScore: ${journal.focusScore.toFixed(3)} | mult: ${specializationMultiplier.toFixed(3)}`);
       }
@@ -284,34 +285,55 @@ export class ScoringService {
         logger.info(`[SPECIFICITY-PENALTY] ${journal.name} | works: ${worksCount} | penalty: -${(specificityPenalty * 100)}%`);
       }
       
-      console.log(`[SCORING] ${journal.name} | works_count: ${worksCount || 'MISSING'} | penalty: ${specificityPenalty} | rawScore: ${rawScore}`);
-
-      // --- NEW: Scalable Cross-Domain and Type Penalties ---
-      // 1. Strong Domain Mismatch Penalty (Replaces keyword blocklists)
-      if (domainMatch < 0.5) {
-        rawScore *= 0.4; // Strong penalty instead of hard deletion
-        logger.info(`[DOMAIN-PENALTY] ${journal.name} penalized (Journal Domain: ${journal.domain} vs Paper: ${extractedFeatures.domain})`);
+      // --- Survey/Review Journal Penalty ---
+      // Survey journals should not outrank primary research venues for original research papers
+      const surveyTerms = ['survey', 'review', 'annual review', 'computing surveys', 'progress in'];
+      const jNameLower = journal.name.toLowerCase();
+      if (surveyTerms.some(t => jNameLower.includes(t))) {
+        rawScore *= 0.75;
+        logger.info(`[SURVEY-PENALTY] ${journal.name} penalized (survey/review journal for original research)`);
       }
 
-      // 2. Clinical vs Analytical/Experimental Separation (Crucial for Chemistry/Bio/Medicine)
-      const clinicalTerms = ['patient', 'trial', 'treatment', 'clinical', 'cohort', 'therapy', 'surgery', 'hospital'];
-      
-      // Determine if paper is clinical
-      const paperText = `${extractedFeatures.domain} ${extractedFeatures.keywords.join(' ')}`.toLowerCase();
-      const isPaperClinical = clinicalTerms.some(term => paperText.includes(term));
-      
-      // Determine if journal is clinical
-      const journalText = `${journal.name} ${journal.scope} ${(journal.keywords || []).join(' ')}`.toLowerCase();
-      const isJournalClinical = clinicalTerms.some(term => journalText.includes(term)) || 
-                                ['lancet', 'jama', 'nejm', 'bmj', 'medicine'].some(term => journalText.includes(term));
+      // --- Elite Venue Domain Bonus ---
+      // When an elite venue's domain matches the paper's domain, boost slightly
+      // to compensate for centroid noise in broad top-tier venues (NeurIPS, ACL)
+      if (journal.isElite && domainMatch >= 0.75) {
+        rawScore *= 1.10;
+        logger.info(`[ELITE-DOMAIN-BONUS] ${journal.name} +10% (elite venue in matching domain)`);
+      }
 
-      if (!isPaperClinical && isJournalClinical) {
-        // Analytical paper paired with a Clinical journal
-        rawScore *= 0.3; // Massive penalty
-        logger.info(`[TYPE-PENALTY] ${journal.name} penalized (Clinical journal vs Analytical paper)`);
-      } else if (isPaperClinical && !isJournalClinical && extractedFeatures.domain === 'medicine') {
-        // Clinical paper paired with a pure Analytical/Bench journal
-        rawScore *= 0.6; // Moderate penalty
+      console.log(`[SCORING] ${journal.name} | works_count: ${worksCount || 'MISSING'} | penalty: ${specificityPenalty} | rawScore: ${rawScore}`);
+
+      // --- Scalable Cross-Domain and Type Penalties ---
+      // 1. Domain Mismatch Penalty — scaled by severity
+      if (domainMatch < 0.5) {
+        rawScore *= 0.5; // Strong penalty for clearly unrelated domains
+        logger.info(`[DOMAIN-PENALTY] ${journal.name} penalized hard (domainMatch: ${domainMatch.toFixed(2)})`);
+      } else if (domainMatch < 0.6) {
+        rawScore *= 0.75; // Moderate penalty for loosely related domains
+        logger.info(`[DOMAIN-PENALTY] ${journal.name} penalized moderate (domainMatch: ${domainMatch.toFixed(2)})`);
+      }
+
+      // 2. Clinical vs Analytical/Experimental Separation (Only for biomedical domains)
+      const biomedicalDomains = ['medicine', 'biology', 'neuroscience', 'chemistry'];
+      if (biomedicalDomains.includes(extractedFeatures.domain?.toLowerCase())) {
+        const clinicalTerms = ['patient', 'trial', 'treatment', 'clinical', 'cohort', 'therapy', 'surgery', 'hospital'];
+        
+        // Determine if paper is clinical
+        const paperText = `${extractedFeatures.domain} ${extractedFeatures.keywords.join(' ')}`.toLowerCase();
+        const isPaperClinical = clinicalTerms.some(term => paperText.includes(term));
+        
+        // Determine if journal is clinical
+        const journalText = `${journal.name} ${journal.scope} ${(journal.keywords || []).join(' ')}`.toLowerCase();
+        const isJournalClinical = clinicalTerms.some(term => journalText.includes(term)) || 
+                                  ['lancet', 'jama', 'nejm', 'bmj', 'medicine'].some(term => journalText.includes(term));
+
+        if (!isPaperClinical && isJournalClinical) {
+          rawScore *= 0.3;
+          logger.info(`[TYPE-PENALTY] ${journal.name} penalized (Clinical journal vs Analytical paper)`);
+        } else if (isPaperClinical && !isJournalClinical && extractedFeatures.domain === 'medicine') {
+          rawScore *= 0.6;
+        }
       }
 
       let score = Math.min(1.0, rawScore);
@@ -343,8 +365,9 @@ export class ScoringService {
         // Alignment is the paper's weight for this venue's dominant type
         contributionAlignment = contributionVector[dominantType] || 0;
 
-        // Apply multiplier: perfect match adds 30% weight, complete mismatch reduces by 30%
-        score *= (0.7 + 0.3 * contributionAlignment);
+        // Apply multiplier: perfect match adds 15% weight, complete mismatch reduces by 15%
+        // Narrowed from 0.7+0.3x to prevent brittle keyword-based venue typing from inverting rankings
+        score *= (0.85 + 0.15 * contributionAlignment);
         const typeLabel = isDefault ? `${dominantType}/default` : dominantType;
         console.log(`[CONTRIB-ALIGN] ${journal.name} → ${contributionAlignment.toFixed(2)} (${typeLabel})`);
       }

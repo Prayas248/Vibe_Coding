@@ -4,8 +4,10 @@ import { EmbeddingService } from '../services/embedding.service.js';
 import { ScoringService } from '../services/scoring.service.js';
 import { JournalSearchService } from '../services/journal-search.service.js';
 import { AnalysisService } from '../services/analysis.service.js';
+import { VectorStoreService } from '../services/vector-store.service.js';
 import { getEliteVenuesForDomain } from '../services/venue-discovery.service.js';
 import { extractKeywordsLocal } from '../utils/keywordExtractor.js';
+import { progressEmitter } from '../utils/progressEmitter.js';
 import logger from '../config/logger.js';
 
 export const analyzePaper = async (req, res, next) => {
@@ -13,12 +15,18 @@ export const analyzePaper = async (req, res, next) => {
     console.log('[CONTROLLER] entered');
     const startTime = Date.now();
     const timings = {};
+    const sessionId = req.headers['x-session-id'] || null;
+
+    const emitProgress = (step, message) => {
+      if (sessionId) progressEmitter.send(sessionId, step, message);
+    };
 
     if (!req.file) {
       return res.status(400).json({ error: 'No PDF file uploaded' });
     }
 
     // --- Step 1: Parsing & Feature Extraction ---
+    emitProgress(1, 'Extracting text from your manuscript...');
     let t0 = Date.now();
     let abstract, abstractSource;
     try {
@@ -40,10 +48,11 @@ export const analyzePaper = async (req, res, next) => {
     timings.pdfExtraction = Date.now() - t0;
     logger.info(`Abstract extracted (Length: ${abstract.length}) via ${abstractSource}`);
 
-    // --- Steps 2 + 2.5: AI extraction + embedding (parallel-safe), then analysis ---
+    // --- Steps 2 + 2.5: AI extraction + embedding + analysis (all parallel) ---
+    emitProgress(2, 'Analyzing research domain and methodology...');
     t0 = Date.now();
-    // Run feature extraction and embedding in parallel (embedding is local, no API conflict)
-    const [extractedFeatures, abstractEmbedding] = await Promise.all([
+    // All three are independent: features=Gemini, embedding=local, analysis=Groq
+    const [extractedFeatures, abstractEmbedding, analysis] = await Promise.all([
       AiService.extractFeatures(abstract).catch(err => {
         console.error('[STEP2 AI FEATURES]', err.message);
         throw err;
@@ -51,14 +60,12 @@ export const analyzePaper = async (req, res, next) => {
       EmbeddingService.getEmbedding(abstract).catch(err => {
         console.error('[STEP2 EMBEDDING]', err.message);
         throw err;
+      }),
+      AnalysisService.analyzePaper(abstract).catch(err => {
+        console.error('[STEP2 ANALYSIS]', err.message);
+        return AnalysisService.getFallbackAnalysis();
       })
     ]);
-    // Run analysis AFTER feature extraction so they don't compete for Groq rate limits
-    const analysis = await AnalysisService.analyzePaper(abstract).catch(err => {
-      console.error('[STEP2 ANALYSIS]', err.message);
-      // Analysis failure is non-fatal — use fallback
-      return AnalysisService.getFallbackAnalysis();
-    });
     timings.aiFeatures = Date.now() - t0;
     logger.info(`AI features + embedding + analysis completed in parallel: ${timings.aiFeatures}ms`);
 
@@ -68,56 +75,106 @@ export const analyzePaper = async (req, res, next) => {
     console.log('[PIPELINE] searchQueries:', extractedFeatures.searchQueries);
     console.log('[PIPELINE] impact_potential:', analysis.impact_potential);
 
-    // --- Step 3: Advanced Journal Discovery (Papers -> Venues -> Abstracts) ---
+    // --- Step 3: Hybrid Journal Discovery (Vector DB → OpenAlex fallback) ---
+    emitProgress(3, 'Searching 3,000+ academic venues...');
     t0 = Date.now();
-    // Use fast local keyword extraction for the initial OpenAlex search
-    const searchKeywords = extractKeywordsLocal(abstract);
-    // Extract first 2-3 sentences as a domain anchor for the structured query
-    const abstractSnippet = abstract.split(/[.!?]/).filter(s => s.trim().length > 30).slice(0, 2).join('. ').trim();
-    logger.info(`Local keywords for OpenAlex search: ${searchKeywords.join(', ')}`);
-
     let candidates;
-    try {
-      candidates = await JournalSearchService.findJournalsByKeywords(
-        searchKeywords,
-        abstractSnippet,
-        abstractEmbedding,
-        extractedFeatures.domain,
-        analysis
-      );
-      console.log('[STEP3] candidates:', candidates.length);
-    } catch (err) {
-      console.error('[STEP3 CRASH]', err.message, err.stack);
-      throw err;
+    let discoveryMode = 'none';
+
+    // Strategy A: Fast vector search from pre-built index
+    if (VectorStoreService.isAvailable()) {
+      const vectorResults = VectorStoreService.search(abstractEmbedding, {
+        topK: 30,
+        domain: extractedFeatures.domain,
+      });
+      logger.info(`[VECTOR-SEARCH] Found ${vectorResults.length} candidates in ${Date.now() - t0}ms`);
+
+      if (vectorResults.length >= 5) {
+        candidates = vectorResults;
+        discoveryMode = 'vector';
+        console.log('[PIPELINE] Using vector search (fast mode)');
+      }
     }
 
-    // Note: Cross-domain and research-type filtering is now handled intelligently 
-    // within ScoringService.computeJournalScores via scalable penalty multipliers 
-    // (e.g., Domain Penalty, Clinical vs Analytical Penalty) rather than brittle keyword blocklists.
+    // Strategy B: Live OpenAlex discovery (fallback if no vector index or too few results)
+    if (!candidates || candidates.length < 5) {
+      console.log('[PIPELINE] Falling back to live OpenAlex discovery...');
+      const searchKeywords = extractKeywordsLocal(abstract);
+      const abstractSnippet = abstract.split(/[.!?]/).filter(s => s.trim().length > 30).slice(0, 2).join('. ').trim();
+      logger.info(`Local keywords for OpenAlex search: ${searchKeywords.join(', ')}`);
+
+      try {
+        const liveResults = await JournalSearchService.findJournalsByKeywords(
+          searchKeywords,
+          abstractSnippet,
+          abstractEmbedding,
+          extractedFeatures.domain,
+          analysis
+        );
+        // Merge with any vector results (vector results first, dedup by id)
+        const seenIds = new Set((candidates || []).map(c => c.id));
+        const merged = [...(candidates || [])];
+        for (const r of liveResults) {
+          if (!seenIds.has(r.id)) {
+            merged.push(r);
+            seenIds.add(r.id);
+          }
+        }
+        candidates = merged;
+        discoveryMode = candidates.length > 0 ? (discoveryMode === 'vector' ? 'hybrid' : 'openalex') : 'none';
+        console.log('[STEP3] live candidates:', liveResults.length, '| merged total:', candidates.length);
+      } catch (err) {
+        console.error('[STEP3 CRASH]', err.message, err.stack);
+        if (!candidates || candidates.length === 0) throw err;
+        // If vector gave us some results, continue despite OpenAlex failure
+        logger.warn(`[STEP3] OpenAlex failed but vector gave ${candidates.length} candidates, continuing...`);
+      }
+    }
 
     timings.journalDiscovery = Date.now() - t0;
-    console.log('[PIPELINE] Step 3 complete');
-    console.log('[PIPELINE] raw candidates:', candidates.length);
-    logger.info(`Discovered ${candidates.length} unique journals from OpenAlex paper search`);
+    console.log(`[PIPELINE] Step 3 complete (mode: ${discoveryMode})`);
+    console.log('[PIPELINE] raw candidates:', candidates?.length || 0);
+    logger.info(`Discovered ${candidates?.length || 0} unique journals via ${discoveryMode}`);
 
+    emitProgress(4, 'Enriching top candidates with publication data...');
     t0 = Date.now();
     let dynamicJournals = [];
-    if (candidates.length > 0) {
-      // Cap enrichment to top 15 candidates to save API calls and time
-      const candidatesToEnrich = candidates.slice(0, 15);
-      logger.info(`[ENRICHMENT] Enriching ${candidatesToEnrich.length} of ${candidates.length} candidates`);
-      const enrichedCandidates = await Promise.all(candidatesToEnrich.map(async (candidate) => {
-        const representation = await JournalSearchService.getJournalRepresentation(candidate.id, candidate.name);
-        if (representation) {
-          return {
-            name: candidate.name,
-            frequency: candidate.frequency,
-            isElite: candidate.isElite,
-            ...representation
-          };
-        }
-        return null;
-      }));
+    if (candidates && candidates.length > 0) {
+      const eliteCandidates = candidates.filter(c => c.isElite);
+      const nonEliteCandidates = candidates.filter(c => !c.isElite);
+      const maxNonElite = Math.max(2, 15 - eliteCandidates.length);
+      const candidatesToEnrich = [...eliteCandidates, ...nonEliteCandidates.slice(0, maxNonElite)];
+      logger.info(`[ENRICHMENT] Enriching ${candidatesToEnrich.length} candidates (${eliteCandidates.length} elite + ${Math.min(maxNonElite, nonEliteCandidates.length)} discovered)`);
+
+      // For vector-sourced candidates, fetch fresh paper abstracts for rich centroid scoring
+      // For OpenAlex-sourced candidates, they already have enrichment data
+      const enrichedCandidates = [];
+      const CONCURRENCY = 10;
+      for (let i = 0; i < candidatesToEnrich.length; i += CONCURRENCY) {
+        const batch = candidatesToEnrich.slice(i, i + CONCURRENCY);
+        const batchResults = await Promise.all(batch.map(async (candidate) => {
+          // If candidate already has abstracts (from OpenAlex pipeline), skip enrichment
+          if (candidate.abstracts && candidate.abstracts.length > 0) {
+            return candidate;
+          }
+          // Fetch fresh paper data from OpenAlex for this venue
+          const representation = await JournalSearchService.getJournalRepresentation(candidate.id, candidate.name);
+          if (representation) {
+            return {
+              name: candidate.name,
+              frequency: candidate.frequency || 1,
+              isElite: candidate.isElite,
+              works_count: candidate.works_count,
+              cited_by_count: candidate.cited_by_count,
+              searchFrequency: candidate.searchFrequency || 0,
+              reputation: candidate.reputation,
+              ...representation
+            };
+          }
+          return null;
+        }));
+        enrichedCandidates.push(...batchResults);
+      }
 
       // --- Robust Semantic Filtering Layer ---
       const activeCandidates = enrichedCandidates.filter(c => c && !c.sparseData);
@@ -127,7 +184,6 @@ export const analyzePaper = async (req, res, next) => {
       // Fix: When OpenAlex abstracts unavailable (budget exhausted), use domain venue cache directly
       if (activeCandidates.length === 0) {
         console.warn('[PIPELINE] No enriched candidates — injecting domain venue cache elites');
-        // First priority: use domain-specific curated venue cache (ACL/EMNLP for nlp, Nature/Cell for biology, etc.)
         const cacheElites = getEliteVenuesForDomain(extractedFeatures.domain) || [];
         const eliteFallbacks = cacheElites.map(v => ({
           name: v.name,
@@ -146,96 +202,9 @@ export const analyzePaper = async (req, res, next) => {
         }
       }
 
-      const journalScoringStats = [];
-      let absoluteMaxSim = 0;
-
-      // First pass: compute all similarities and find the global maximum
-      for (const journal of activeCandidates) {
-        let stat = { journal, maxSim: 0, topTwoAvg: 0 };
-        if (journal.abstracts && journal.abstracts.length > 0) {
-          const abstractEmbeddings = await Promise.all(
-            journal.abstracts.map(text => EmbeddingService.getEmbedding(text))
-          );
-
-          const sims = abstractEmbeddings.map(emb => {
-            let dot = 0, normA = 0, normB = 0;
-            for (let i = 0; i < emb.length; i++) {
-              dot += emb[i] * abstractEmbedding[i];
-              normA += emb[i] * emb[i];
-              normB += abstractEmbedding[i] * abstractEmbedding[i];
-            }
-            return (normA > 0 && normB > 0) ? dot / (Math.sqrt(normA) * Math.sqrt(normB)) : 0;
-          }).sort((a, b) => b - a);
-
-          stat.maxSim = sims[0] || 0;
-          stat.topTwoAvg = (sims[0] + (sims[1] || sims[0])) / 2;
-
-          if (stat.maxSim > absoluteMaxSim) absoluteMaxSim = stat.maxSim;
-        }
-
-        // [ELITE-SCORE-FLOOR] Prevent elite venues from sinking to bottom due to thin centroids
-        if (stat.journal.isElite && (!stat.maxSim || stat.maxSim < 0.1)) {
-          logger.info(`[ELITE-SCORE-FLOOR] ${stat.journal.name} — thin centroid detected, applying score floor`);
-          stat.maxSim = 0.1;
-        }
-
-        journalScoringStats.push(stat);
-      }
-
-      // Second pass: apply simplified adaptive consistency thresholds
-      // 1. Relative threshold: Keep if >= 60% of absolute best candidate (loosened from 0.1 gap)
-      // 2. Consistency floor: Ensure the journal consistently publishes in this area
-      // 3. Hard floor: Keep if Max similarity exceeds 0.35 regardless of other factors
-      const ADAPTIVE_THRESHOLD = 0.60;
-      const HARD_FLOOR = 0.35;
-      const MIN_CONSISTENCY = 0.28;
-
-      logger.info(`[ADAPTIVE-THRESHOLD] BestGlobal: ${absoluteMaxSim.toFixed(4)} | threshold: ${(absoluteMaxSim * ADAPTIVE_THRESHOLD).toFixed(4)}`);
-
-      const filtered = journalScoringStats.filter(stat => {
-        logger.info(`[FILTER-ENTRY] ${stat.journal.name} → isElite: ${!!stat.journal.isElite}`);
-        // Fix 1: Elite venues bypass adaptive filter
-        if (stat.journal.isElite) {
-          // Elite venues bypass filter ONLY if they have at least minimal semantic signal
-          // This prevents irrelevant elite venues (e.g. Cell for a toxicology paper) from forcing their way in
-          let eliteMinSim = absoluteMaxSim * 0.30; // Must score at least 30% of best match
-          
-          // If the journal domain perfectly matches the extracted domain, lower the floor
-          // to ensure core domain venues (like ACL for NLP) are never dropped due to thin centroids
-          if (stat.journal.domain && extractedFeatures.domain) {
-            const extMapped = extractedFeatures.domain === 'nlp' ? 'natural language processing' : 
-                              extractedFeatures.domain === 'cs_ai' ? 'artificial intelligence' : extractedFeatures.domain;
-            if (extMapped.toLowerCase() === stat.journal.domain.toLowerCase() || stat.journal.domain.toLowerCase().includes(extMapped.toLowerCase())) {
-              eliteMinSim = absoluteMaxSim * 0.10; // Practically bypass the filter
-            }
-          }
-
-          if (stat.maxSim >= eliteMinSim || stat.maxSim === 0) {
-            logger.info(`[ELITE-BYPASS] ${stat.journal.name} — passed (sim: ${stat.maxSim.toFixed(3)}, floor: ${eliteMinSim.toFixed(3)})`);
-            return true;
-          }
-          logger.info(`[ELITE-FILTER] ${stat.journal.name} — elite venue rejected (sim: ${stat.maxSim.toFixed(3)} below floor: ${eliteMinSim.toFixed(3)})`);
-          return false;
-        }
-
-        // NEVER filter out the absolute best match found, even if it's weak
-        const isBestMatch = stat.maxSim === absoluteMaxSim && absoluteMaxSim > 0;
-        // Hard signal floor: Signal is strong enough to keep regardless of relative ranking
-        const isAboveHardFloor = stat.maxSim > HARD_FLOOR;
-        // Must be competitive with the best match found
-        const isCompetitive = stat.maxSim >= (absoluteMaxSim * ADAPTIVE_THRESHOLD);
-        // Must have consistent research focus (top-two average)
-        const isConsistent = stat.topTwoAvg >= MIN_CONSISTENCY;
-
-        const keep = isBestMatch || isAboveHardFloor || (isCompetitive && isConsistent);
-
-        if (!keep && stat.journal.abstracts?.length > 0) {
-          logger.info(`Discarding ${stat.journal.name} - Failed adaptive filter (Max: ${stat.maxSim.toFixed(2)}, Top2: ${stat.topTwoAvg.toFixed(2)}, BestGlobal: ${absoluteMaxSim.toFixed(2)})`);
-        }
-        return keep || !stat.journal.abstracts; // Keep fallbacks with no data
-      }).map(stat => stat.journal);
-
-      dynamicJournals.push(...filtered);
+      // Pass all active candidates directly to scoring — no redundant pre-filtering
+      // The scoring service computes embeddings (with caching) and handles ranking properly
+      dynamicJournals.push(...activeCandidates);
       console.log('[PIPELINE] Step 3.8 complete');
       console.log('[PIPELINE] after filter:', dynamicJournals.length);
 
@@ -251,10 +220,11 @@ export const analyzePaper = async (req, res, next) => {
         }
       }));
       timings.journalEnrichment = Date.now() - t0;
-      logger.info(`Robust filtering retained ${dynamicJournals.length} journals (Best Global Sim: ${absoluteMaxSim.toFixed(2)})`);
+      logger.info(`Enrichment complete: ${dynamicJournals.length} journals ready for scoring`);
     }
 
     // --- Step 4: Scoring, Explanation & Ranking ---
+    emitProgress(5, 'Computing semantic match scores...');
     t0 = Date.now();
     const scoredJournals = await ScoringService.computeJournalScores(
       abstractEmbedding,
@@ -295,10 +265,12 @@ export const analyzePaper = async (req, res, next) => {
       });
     }
 
+    emitProgress(6, 'Generating detailed explanations...');
     t0 = Date.now();
     const journalsWithExplanations = await AiService.generateExplanations(abstract, extractedFeatures, top5);
     timings.explanations = Date.now() - t0;
 
+    emitProgress(7, 'Finalizing your results...');
     const readinessScore = ScoringService.computeReadiness(top5[0], extractedFeatures, analysis);
 
     const totalTime = Date.now() - startTime;

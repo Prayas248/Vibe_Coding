@@ -33,7 +33,7 @@ let cacheReady = false;
 async function getTopicsForQuery(query) {
   const res = await fetch(
     `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per_page=10&select=topics`,
-    { headers: { 'User-Agent': 'vibeapp/1.0' } }
+    { headers: { 'User-Agent': 'orbis/1.0' } }
   );
   const data = await res.json();
   const topicIds = [...new Set(
@@ -45,7 +45,7 @@ async function getTopicsForQuery(query) {
 async function getTopVenuesForTopic(topicId) {
   const res = await fetch(
     `https://api.openalex.org/works?filter=topics.id:${topicId}&sort=cited_by_count:desc&per_page=50&select=primary_location`,
-    { headers: { 'User-Agent': 'vibeapp/1.0' } }
+    { headers: { 'User-Agent': 'orbis/1.0' } }
   );
   const data = await res.json();
 
@@ -86,7 +86,7 @@ export async function buildVenueCache() {
   // Check OpenAlex budget status at startup
   try {
     const budgetCheck = await fetch('https://api.openalex.org/works?filter=is_oa:true&per_page=1', {
-      headers: { 'User-Agent': 'vibeapp/1.0' }
+      headers: { 'User-Agent': 'orbis/1.0' }
     });
     const remaining = budgetCheck.headers.get('x-ratelimit-remaining');
     console.log('[OPENALEX] Budget remaining at startup:', remaining ?? 'unknown');
@@ -197,9 +197,13 @@ export function getEliteVenuesForDomain(domain) {
     logger.warn(`[VENUE-DISCOVERY] Cache not ready — falling back to static list for domain: ${normalizedDomain}`);
     return (ELITE_VENUES[normalizedDomain] || []).map(v => ({ ...v, isElite: true }));
   }
-  // Merge domain-specific + general_stem, deduplicated by ID
+  // Merge domain-specific + general_stem (only for non-CS domains), deduplicated by ID
   const domainVenues = venueCache[normalizedDomain] || [];
-  const stemVenues = venueCache['general_stem'] || [];
+  
+  // Don't inject general_stem (Nature/Science/PNAS) into CS/NLP domains — they crowd out real matches
+  const skipStemMerge = ['cs_ai', 'nlp'].includes(normalizedDomain);
+  const stemVenues = skipStemMerge ? [] : (venueCache['general_stem'] || []);
+  
   const merged = new Map();
   [...stemVenues, ...domainVenues].forEach(v => merged.set(v.id, v));
   return Array.from(merged.values());

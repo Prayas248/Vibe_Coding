@@ -75,13 +75,13 @@ export default function Landing() {
       
       <nav className={`landing-nav ${scrolled ? 'scrolled' : ''}`}>
         <div className="nav-left">
-          <Link to="/" className="logo">Vibe</Link>
+          <Link to="/" className="logo">Orbis</Link>
           <span className="nav-separator">|</span>
           <span className="nav-tagline">research → venue</span>
         </div>
         <div className="nav-right">
           <button onClick={scrollToPipeline} className="nav-link">How it works</button>
-          <Link to="/analyze" className="btn-nav">Try Vibe</Link>
+          <Link to="/analyze" className="btn-nav">Try Orbis</Link>
         </div>
       </nav>
 
@@ -94,7 +94,7 @@ export default function Landing() {
           <span className="primary animate-in delay-200">research belongs.</span>
         </h1>
         <p className="hero-subtitle animate-in delay-400 mono-label">
-          Upload your abstract. In seconds, Vibe surfaces the journals and conferences most likely to accept your work.
+          Upload your abstract. In seconds, Orbis surfaces the journals and conferences most likely to accept your work.
         </p>
         <div className="cta-group animate-in delay-600">
           <Link to="/analyze" className="btn-primary">
@@ -125,7 +125,7 @@ export default function Landing() {
 
       <section id="pipeline" className="pipeline-section">
         <div className="section-header">
-          <h2>How Vibe Thinks</h2>
+          <h2>How Orbis Thinks</h2>
           <p className="mono-label">A 6-stage analytical pipeline.</p>
         </div>
         <div className="pipeline-grid">
@@ -191,7 +191,7 @@ export default function Landing() {
           <div><span className="code-var">displayScore</span>   <span className="code-op">=</span> <span className="code-func">min</span>(<span className="code-num">1.0</span>, <span className="code-num">0.45</span> <span className="code-op">+</span> score<span className="code-op">^</span><span className="code-num">0.7</span> <span className="code-op">×</span> <span className="code-num">0.6</span>)</div>
         </div>
         <p className="formula-desc mono-label">
-          Vibe weights semantic fit above all else, then tunes for keyword relevance, domain alignment, and journal reputation.
+          Orbis weights semantic fit above all else, then tunes for keyword relevance, domain alignment, and journal reputation.
         </p>
       </section>
 
@@ -212,11 +212,11 @@ export default function Landing() {
       <footer className="cta-footer">
         <h2>Your research deserves the right audience.</h2>
         <Link to="/analyze" className="btn-primary btn-large">
-          → Open Vibe
+          → Open Orbis
         </Link>
         <div className="cta-footer-meta">
           <div className="footer-col">
-            <span>© 2026 Vibe</span>
+            <span>© 2026 Orbis</span>
             <span>MIT License</span>
           </div>
           <div className="footer-col">

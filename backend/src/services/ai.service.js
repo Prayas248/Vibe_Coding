@@ -2,6 +2,8 @@ import Groq from 'groq-sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
 import logger from '../config/logger.js';
+import { extractKeywordsLocal, extractKeywordsWithEmbeddings } from '../utils/keywordExtractor.js';
+import { EmbeddingService } from './embedding.service.js';
 
 // Lazy-initialized: dotenv may not have run yet at module parse time (ESM hoisting)
 let _ai = null;
@@ -40,11 +42,20 @@ function getGemini() {
   }
 }
 
+// Circuit breaker for Gemini — once 429'd, skip for 1 hour
+let geminiCircuitBroken = false;
+let geminiCircuitResetAt = 0;
+
 async function callGemini(prompt, isJson = true) {
+  if (geminiCircuitBroken && Date.now() < geminiCircuitResetAt) {
+    throw new Error('Gemini circuit breaker open (quota exhausted)');
+  }
+  geminiCircuitBroken = false;
+
   const genAI = getGemini();
   if (!genAI) throw new Error('Gemini not available');
 
-  const models = ["gemini-2.0-flash", "gemini-2.0-flash-lite"];
+  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
   let lastErr;
 
   for (const modelName of models) {
@@ -62,8 +73,9 @@ async function callGemini(prompt, isJson = true) {
       lastErr = err;
       const isQuota = err.message?.includes('429') || err.message?.includes('quota') || err.message?.includes('rate');
       if (isQuota) {
-        console.warn(`[AI] Gemini/${modelName} rate limited, waiting 3s before trying next...`);
-        await new Promise(r => setTimeout(r, 3000));
+        console.warn(`[AI] Gemini/${modelName} rate limited — tripping circuit breaker for 1h`);
+        geminiCircuitBroken = true;
+        geminiCircuitResetAt = Date.now() + 3600_000;
         continue;
       }
       throw err;
@@ -96,24 +108,40 @@ const DEFAULT_MODEL = "llama-3.3-70b-versatile";
 
 const GROQ_FALLBACK_MODELS = [
   'llama-3.3-70b-versatile',
-  'llama-3.1-70b-versatile',
-  'mixtral-8x7b-32768',
-  'qwen-qwq-32b'
 ];
 
-async function callGroqWithFallback(ai, prompt, validator = null) {
+async function callWithFallback(prompt, validator = null) {
+  // 1. Try Gemini first (primary — gemini-2.5-flash)
+  try {
+    console.log('[AI] Trying Gemini (primary)...');
+    const text = await callGemini(prompt, true);
+    if (validator) validator(text);
+    return text;
+  } catch (geminiErr) {
+    const reason = geminiErr.message?.includes('circuit breaker') ? 'Circuit Breaker' :
+                   geminiErr.message?.includes('429') ? 'Rate Limited' :
+                   geminiErr.message?.includes('not available') ? 'No Key' :
+                   geminiErr.message === 'GARBAGE_FEATURES' ? 'Validation Failed' :
+                   geminiErr.message?.slice(0, 60);
+    console.warn(`[AI] Gemini failed (${reason}), falling back to Groq...`);
+  }
+
+  // 2. Fallback to Groq
+  const ai = getAI();
+  if (!ai) {
+    throw new Error('All LLM providers unavailable (Gemini failed, Groq not configured)');
+  }
+
   for (const model of GROQ_FALLBACK_MODELS) {
     try {
-      console.log(`[AI] Attempting Groq: ${model}`);
+      console.log(`[AI] Attempting Groq fallback: ${model}`);
       const response = await ai.chat.completions.create({
         messages: [{ role: "user", content: prompt }],
-        model: model,
+        model,
         response_format: { type: "json_object" }
       });
       const text = response.choices[0].message.content;
-      if (validator) {
-        validator(text);
-      }
+      if (validator) validator(text);
       return text;
     } catch (err) {
       const isRateLimit = err.status === 429 || err.message?.includes('429') || err.message?.includes('rate');
@@ -123,22 +151,57 @@ async function callGroqWithFallback(ai, prompt, validator = null) {
       if (isRateLimit || isDecommissioned || isGarbage) {
         const reason = isRateLimit ? 'Rate Limited' : isDecommissioned ? 'Model Retired' : 'Validation Failed';
         console.warn(`[AI] Groq/${model} failed (${reason}), trying next fallback...`);
-        // Brief wait on rate limit to let the per-minute window partially reset
         if (isRateLimit) await new Promise(r => setTimeout(r, 3000));
         continue;
       }
       throw err;
     }
   }
-  console.warn('[AI] ALL GROQ MODELS EXHAUSTED — Initiating Gemini emergency fallback');
-  return callGemini(prompt, true);
+
+  throw new Error('All LLM providers exhausted (Gemini + Groq)');
+}
+
+// Groq-primary path for non-critical calls (faster, saves Gemini tokens)
+async function callWithFallbackGroqFirst(prompt, validator = null) {
+  // 1. Try Groq first (faster LPU inference)
+  const ai = getAI();
+  if (ai) {
+    for (const model of GROQ_FALLBACK_MODELS) {
+      try {
+        console.log(`[AI-FAST] Trying Groq: ${model}`);
+        const response = await ai.chat.completions.create({
+          messages: [{ role: "user", content: prompt }],
+          model,
+          response_format: { type: "json_object" }
+        });
+        const text = response.choices[0].message.content;
+        if (validator) validator(text);
+        return text;
+      } catch (err) {
+        const isRateLimit = err.status === 429 || err.message?.includes('429') || err.message?.includes('rate');
+        const isDecommissioned = err.message?.includes('decommissioned') || err.message?.includes('model_decommissioned');
+        const isGarbage = err.message === 'GARBAGE_FEATURES';
+        if (isRateLimit || isDecommissioned || isGarbage) {
+          console.warn(`[AI-FAST] Groq/${model} failed, trying Gemini fallback...`);
+          if (isRateLimit) await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  // 2. Fallback to Gemini
+  console.log('[AI-FAST] Groq unavailable, falling back to Gemini...');
+  const text = await callGemini(prompt, true);
+  if (validator) validator(text);
+  return text;
 }
 
 export class AiService {
   static async extractFeatures(abstract) {
-    const ai = getAI();
-    if (!ai) {
-      logger.warn('AI not initialized, using mock feature extraction.');
+    if (!getAI() && !getGemini()) {
+      logger.warn('No LLM providers available, using mock feature extraction.');
       return {
         domain: "Artificial Intelligence",
         keywords: ["machine learning", "neural networks", "data analysis", "prediction", "automation"],
@@ -146,59 +209,19 @@ export class AiService {
       };
     }
 
-    const prompt = `
-Analyze the following research paper abstract holistically to identify its primary research discipline.
-Return exactly and ONLY a JSON object with the following fields:
-- "domain": The primary research domain. You MUST choose exactly one from this list: 
-  "cs_ai", "nlp", "biology", "neuroscience", "medicine", "chemistry", "physics", "general_stem".
+    const prompt = `Classify this research abstract. Return ONLY JSON with these fields:
+- "domain": exactly one of: "cs_ai", "nlp", "biology", "neuroscience", "medicine", "chemistry", "physics", "general_stem"
+- "keywords": array of 5-8 multi-word technical phrases (2+ words each, no generic terms like "model" or "method")
+- "summary": 1-2 sentence summary
 
-Reasoning Rules:
-1. Identify the primary discipline: What conference or journal would researchers in this field submit to?
-2. Subject Matter vs. Methods: Classify by the subject matter being studied, not the methods used.
-3. ML/Stats as a Tool: A paper using ML to study metabolism → chemistry or biology, not cs_ai.
-4. NLP vs CS_AI boundary — this is CRITICAL:
-   - "nlp": Any paper whose primary contribution is about LANGUAGE, TEXT, or SPEECH.
-     This includes: machine translation, language models, attention mechanisms for sequence transduction,
-     text generation, question answering, summarization, parsing, sentiment, NLP benchmarks.
-     Papers submitted to ACL, EMNLP, NAACL, COLING → nlp.
-   - "cs_ai": Core AI/ML theory or non-language tasks.
-     This includes: computer vision, image classification, reinforcement learning, graph neural networks,
-     generative image models, autonomous systems.
-     Papers submitted to NeurIPS, ICML, ICLR, CVPR → cs_ai.
-   - If a paper proposes a TRANSFORMER ARCHITECTURE used for MACHINE TRANSLATION or LANGUAGE tasks → nlp.
-   - If a paper proposes a vision or general ML architecture unrelated to language → cs_ai.
-
-Domain Guidelines:
-- "cs_ai": Core AI/ML theory, computer vision, image understanding, RL, general model architectures not primarily about language.
-- "nlp": Natural language processing, computational linguistics, machine translation, language modeling, text tasks.
-- "neuroscience": Brain research and nervous system studies.
-- "biology": Life sciences, genetics, molecular biology, genomics.
-- "medicine": Clinical research, trials, patient care, pharmacology.
-- "chemistry": Physical chemistry, analytical chemistry, metabolomics, chemical synthesis.
-- "physics": Physical sciences, quantum mechanics, astrophysics.
-- "general_stem": Highly interdisciplinary spanning multiple core STEM fields.
-
-Examples — commit these to memory:
-- "Transformer, attention mechanism, multi-head attention, encoder-decoder, machine translation, sequence transduction" → nlp
-- "BERT, GPT, language model, text classification, question answering" → nlp
-- "Convolutional network, image classification, object detection, CIFAR, ImageNet" → cs_ai
-- "Reinforcement learning, reward function, policy gradient, game playing" → cs_ai
-- "Metabolomics, mass spectrometry, LC-MS, acylcarnitines" → chemistry
-- "CRISPR, gene expression, protein folding" → biology
-- "Synaptic plasticity, neurons, hippocampus" → neuroscience
-- "Randomized controlled trial, clinical outcomes, patient cohort" → medicine
-
-- "keywords": An array of 5 to 8 specific technical keywords from the paper.
-  IMPORTANT: Keywords must be multi-word technical phrases specific to this paper's methodology.
-  Never return single generic words like "model", "method", "analysis", "study", "paper", "best", "attention".
-  Good examples: "scaled dot-product attention", "sequence transduction", "byte-pair encoding"
-  Bad examples: "model", "attention", "best", "method"
-  Each keyword must be at least 2 words and domain-specific.
-- "summary": A short 1-2 sentence summary of the abstract.
+Domain rules:
+- Classify by SUBJECT MATTER, not methods used (ML applied to biology → biology, not cs_ai)
+- nlp: language/text/speech tasks (translation, LMs, QA, summarization, parsing). Venue: ACL/EMNLP/NAACL
+- cs_ai: ML theory, vision, RL, non-language architectures. Venue: NeurIPS/ICML/ICLR/CVPR
+- Transformer for machine translation → nlp. Vision/general architecture → cs_ai
 
 Abstract:
-${abstract}
-`;
+${abstract}`;
 
     try {
       const validator = (text) => {
@@ -228,7 +251,7 @@ ${abstract}
         }
       };
 
-      let text = await callGroqWithFallback(ai, prompt, validator);
+      let text = await callWithFallback(prompt, validator);
       
       if (!text) throw new Error('Empty response from LLM');
       let parsed;
@@ -279,12 +302,15 @@ ${abstract}
         else if (/\b(synthesis|catalysis|reaction|molecule|compound|polymer|spectroscopy|chromatography|organic|inorganic)\b/.test(text)) domain = 'chemistry';
         else if (/\b(quantum|particle|thermodynamics|electromagnetic|astrophysics|optics|condensed matter|mechanics)\b/.test(text)) domain = 'physics';
 
-        // Extract keywords: grab meaningful capitalized or technical words, filter stop words
-        const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'has', 'have', 'been', 'our', 'we', 'in', 'on', 'of', 'to', 'a', 'an', 'is', 'it', 'its', 'by', 'as', 'at', 'be', 'can', 'may', 'also', 'using', 'used', 'based', 'which', 'these', 'their', 'than', 'such', 'more', 'show', 'than', 'into', 'not', 'between', 'while', 'both', 'through', 'each']);
-        const rawWords = abstract.match(/\b[a-zA-Z]{4,}\b/g) || [];
-        const freq = {};
-        rawWords.forEach(w => { const lw = w.toLowerCase(); if (!STOP_WORDS.has(lw)) freq[lw] = (freq[lw] || 0) + 1; });
-        const keywords = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 7).map(([w]) => w);
+        // Extract keywords using embedding-based KeyBERT approach (local, no API needed)
+        let keywords;
+        try {
+          keywords = await extractKeywordsWithEmbeddings(abstract, (t) => EmbeddingService.getEmbedding(t));
+          logger.info(`[AI] Embedding-based keywords: ${keywords.join(', ')}`);
+        } catch (embErr) {
+          logger.warn(`[AI] Embedding keyword extraction failed, using n-gram fallback: ${embErr.message}`);
+          keywords = extractKeywordsLocal(abstract);
+        }
 
         return {
           domain,
@@ -298,28 +324,19 @@ ${abstract}
   }
 
   static async recommendJournals(abstract, extractedFeatures) {
-    const ai = getAI();
-    if (!ai) return [];
+    if (!getAI() && !getGemini()) return [];
 
-    const prompt = `
-You are an expert academic advisor. Based on the abstract and features, recommend the 5 best REAL-WORLD academic journals or conferences for this paper.
+    const prompt = `Recommend 5 real academic journals/conferences for this paper. Return ONLY a JSON array of 5 objects with: "name" (official name), "scope" (1 sentence), "domain", "keywords" (5-8 terms).
 
-Paper Abstract: ${abstract}
-Paper Domain: ${extractedFeatures.domain}
-Paper Keywords: ${extractedFeatures.keywords.join(', ')}
-
-Return exactly and ONLY a JSON array of 5 objects. Each object must have:
-- "name": The official name of the journal/conference.
-- "scope": A 1-sentence description of its official scope.
-- "domain": The primary research domain.
-- "keywords": An array of 5-8 relevant keywords for the journal.
-`;
+Domain: ${extractedFeatures.domain}
+Keywords: ${extractedFeatures.keywords.join(', ')}
+Abstract: ${abstract.slice(0, 500)}`;
 
     try {
-      let text = await callGroqWithFallback(ai, prompt);
+      let text = await callWithFallbackGroqFirst(prompt);
       
       const parsed = JSON.parse(text);
-      // Groq sometimes wraps in a root object if asked for a list, handle both
+      // LLM sometimes wraps in a root object if asked for a list, handle both
       const list = Array.isArray(parsed) ? parsed : (parsed.journals || parsed.recommendations || []);
 
       const validated = z.array(recommendedJournalSchema).safeParse(list);
@@ -331,27 +348,16 @@ Return exactly and ONLY a JSON array of 5 objects. Each object must have:
   }
 
   static async enrichJournals(candidateJournals, abstract, extractedFeatures) {
-    const ai = getAI();
-    if (!ai || !candidateJournals || candidateJournals.length === 0) return candidateJournals;
+    if ((!getAI() && !getGemini()) || !candidateJournals || candidateJournals.length === 0) return candidateJournals;
 
     const journalNames = candidateJournals.map(c => c.name).join(', ');
 
-    const prompt = `
-You are an expert academic advisor. I have found potential journals for a research paper using the OpenAlex API.
-Please provide the official scope, domain, and 5-8 keywords for EACH of these journals so we can accurately score them.
+    const prompt = `For each journal, provide scope/domain/keywords. Return ONLY a JSON array of objects with: "name" (exact match), "scope" (1 sentence), "domain", "keywords" (5-8 terms).
 
-Paper Abstract: ${abstract}
-Journals to enrich: ${journalNames}
-
-Return exactly and ONLY a JSON array of objects. Each object must have:
-- "name": The official name of the journal (match exactly from the list provided).
-- "scope": A 1-sentence description of its official scope.
-- "domain": The primary research domain.
-- "keywords": An array of 5-8 relevant keywords for the journal.
-`;
+Journals: ${journalNames}`;
 
     try {
-      let text = await callGroqWithFallback(ai, prompt);
+      let text = await callWithFallbackGroqFirst(prompt);
       
       const parsed = JSON.parse(text);
       const list = Array.isArray(parsed) ? parsed : (parsed.journals || parsed.enrichedJournals || []);
@@ -365,25 +371,16 @@ Return exactly and ONLY a JSON array of objects. Each object must have:
   }
 
   static async generateExplanations(abstract, extractedFeatures, topJournals) {
-    const ai = getAI();
-    if (!ai) return topJournals.map(j => ({ ...j, explanation: { fitReason: "Match based on scope.", risks: [], suggestions: [] } }));
+    if (!getAI() && !getGemini()) return topJournals.map(j => ({ ...j, explanation: { fitReason: "Match based on scope.", risks: [], suggestions: [] } }));
 
-    const prompt = `
-You are an expert academic advisor. For EACH of the ${topJournals.length} journals, explain the fit, identify risks, and give suggestions.
+    const prompt = `For each journal, explain paper fit briefly. Return JSON: {"explanations": [{fitReason: "1 sentence", risks: ["1-2 items"], suggestions: ["1-2 items"]}]} in same order.
 
-Paper Abstract: ${abstract}
-Journals selected:
-${topJournals.map((j, i) => `${i + 1}. ${j.name} (Scope: ${j.scope})`).join('\n')}
-
-Return exactly and ONLY a JSON object with a single key "explanations", which must be an array of objects. The array must be in the same order as the journals provided.
-Each object in the array must have:
-- "fitReason": A 1-sentence explanation of why the paper fits this journal.
-- "risks": An array of 1-2 strings, describing potential risks.
-- "suggestions": An array of 1-2 strings, giving actionable suggestions.
-`;
+Paper topic: ${extractedFeatures.keywords.slice(0, 4).join(', ')}
+Journals:
+${topJournals.map((j, i) => `${i + 1}. ${j.name}`).join('\n')}`;
 
     try {
-      let text = await callGroqWithFallback(ai, prompt);
+      let text = await callWithFallbackGroqFirst(prompt);
       
       const parsed = JSON.parse(text);
 
@@ -402,49 +399,55 @@ Each object in the array must have:
       }));
     } catch (error) {
       logger.error(`AI explanation generation failed: ${error.message}`);
-      return topJournals;
+      // Always return journals with a fallback explanation so the frontend never gets undefined
+      return topJournals.map(journal => ({
+        ...journal,
+        explanation: journal.explanation || {
+          fitReason: "The paper aligns with this venue's research focus area.",
+          risks: ["AI explanation temporarily unavailable due to rate limits."],
+          suggestions: ["Review the journal's official scope and recent publications."]
+        }
+      }));
     }
   }
 
   static async generateSearchQueries(abstract, domain) {
-    const ai = getAI();
-    if (!ai) {
-      return ["research paper", "study results", "academic findings"]; // Fallback if no AI
+    if (!getAI() && !getGemini()) {
+      // Use local keyword extraction for meaningful queries instead of generic terms
+      const { generateLocalSearchQueries } = await import('../utils/keywordExtractor.js');
+      const localQueries = generateLocalSearchQueries(abstract, domain);
+      if (localQueries.length >= 2) {
+        logger.info(`[AI] No AI available — using local keyword-based search queries: ${localQueries.join(' | ')}`);
+        return localQueries;
+      }
+      return ["research paper", "study results", "academic findings"];
     }
 
-    const prompt = `
-You are an academic search expert. Given this abstract and domain, generate exactly 3 search queries optimized for finding related academic papers in OpenAlex.
-
-Rules:
-- Each query should be 3-5 words maximum
-- Use specific technical terminology from the abstract
-- Avoid generic words like "study", "research", "analysis", "methods", "results"
-- Each query should target a different aspect of the paper
-- Return ONLY a JSON array of 3 strings, nothing else
+    const prompt = `Generate 5 OpenAlex search queries (3-7 technical words each) for finding papers related to this abstract. Each query targets a different aspect: core method, problem, innovation, evaluation, broader field. No generic words (study, research, novel, approach). Return ONLY a JSON array of 5 strings.
 
 Domain: ${domain}
-Abstract: ${abstract}
-
-Example output for a neuroscience paper:
-["chromatin remodeling neuronal plasticity", "epigenetic regulation brain memory", "histone modification synaptic function"]
-
-Example output for an NLP paper:
-["transformer attention mechanism translation", "multilingual sequence transduction", "neural machine translation BLEU"]
-`;
+Abstract: ${abstract.slice(0, 500)}`;
 
     try {
-      let text = await callGroqWithFallback(ai, prompt);
+      let text = await callWithFallbackGroqFirst(prompt);
       
       const parsed = JSON.parse(text);
       
       const queries = Array.isArray(parsed) ? parsed : (parsed.queries || parsed.searchQueries || Object.values(parsed).find(Array.isArray) || []);
       
       if (Array.isArray(queries) && queries.length > 0) {
-        return queries.slice(0, 3).map(String);
+        return queries.slice(0, 5).map(String);
       }
       return ["research paper", "study results", "academic findings"];
     } catch (error) {
       logger.error(`AI search queries generation failed: ${error.message}`);
+      // Fall back to local keyword-based queries
+      const { generateLocalSearchQueries } = await import('../utils/keywordExtractor.js');
+      const localQueries = generateLocalSearchQueries(abstract, domain);
+      if (localQueries.length >= 2) {
+        logger.info(`[AI] LLM failed — using local keyword-based search queries: ${localQueries.join(' | ')}`);
+        return localQueries;
+      }
       return ["research paper", "study results", "academic findings"];
     }
   }

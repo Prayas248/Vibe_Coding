@@ -3,12 +3,14 @@ import { UploadCloud, CheckCircle, AlertTriangle, FileText, Loader2, ArrowRight,
 import { useNavigate, Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import StarMap from '../components/StarMap';
+import ProgressSteps from '../components/ProgressSteps';
 import '../Landing.css';
 
 export default function AnalyzePage() {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [progressSessionId, setProgressSessionId] = useState(null);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
 
@@ -53,6 +55,9 @@ export default function AnalyzePage() {
     setLoading(true);
     setError('');
 
+    const trackingId = uuidv4();
+    setProgressSessionId(trackingId);
+
     const formData = new FormData();
     formData.append('file', file);
 
@@ -60,6 +65,9 @@ export default function AnalyzePage() {
       const res = await fetch('http://localhost:3000/analyze', {
         method: 'POST',
         body: formData,
+        headers: {
+          'X-Session-Id': trackingId,
+        },
       });
 
       if (!res.ok) {
@@ -68,7 +76,7 @@ export default function AnalyzePage() {
 
       const data = await res.json();
       const sessionId = uuidv4();
-      sessionStorage.setItem(`vibe_result_${sessionId}`, JSON.stringify({
+      sessionStorage.setItem(`orbis_result_${sessionId}`, JSON.stringify({
         ...data,
         fileName: file.name
       }));
@@ -78,6 +86,7 @@ export default function AnalyzePage() {
       setError(err.message || 'An unexpected error occurred.');
     } finally {
       setLoading(false);
+      setProgressSessionId(null);
     }
   };
 
@@ -87,7 +96,7 @@ export default function AnalyzePage() {
       
       <nav className="landing-nav scrolled">
         <div className="nav-left">
-          <Link to="/" className="logo">Vibe</Link>
+          <Link to="/" className="logo">Orbis</Link>
           <span className="nav-separator">|</span>
           <span className="nav-tagline">submission terminal</span>
         </div>
@@ -104,7 +113,7 @@ export default function AnalyzePage() {
             Submit your <span className="italic serif-text">manuscript.</span>
           </h1>
           <p className="hero-subtitle mono-label max-w-2xl mx-auto opacity-70">
-            Vibe processes your research locally before running a semantic vector search across 200M+ academic records.
+            Orbis processes your research locally before running a semantic vector search across 200M+ academic records.
           </p>
         </div>
 
@@ -176,7 +185,7 @@ export default function AnalyzePage() {
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" size={18} />
-                  PROCESSING...
+                  ANALYZING...
                 </>
               ) : (
                 <>
@@ -184,6 +193,8 @@ export default function AnalyzePage() {
                 </>
               )}
             </button>
+
+            <ProgressSteps sessionId={progressSessionId} isActive={loading} />
             
             <p className="text-[10px] text-muted-foreground mono-label uppercase tracking-widest">
               By submitting, you agree to our processing of academic metadata.

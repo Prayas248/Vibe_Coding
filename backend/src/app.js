@@ -17,7 +17,7 @@ app.get('/debug/openalex', async (req, res) => {
   try {
     const response = await fetch(
       'https://api.openalex.org/works?search=transformer+attention+mechanism&per-page=1',
-      { headers: { 'User-Agent': 'Vibe/1.0 (mailto:your@email.com)' } }
+      { headers: { 'User-Agent': 'Orbis/1.0 (mailto:your@email.com)' } }
     );
     const data = await response.json();
     res.json({
