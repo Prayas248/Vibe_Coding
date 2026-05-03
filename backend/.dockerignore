@@ -1,0 +1,61 @@
+# -----------------------
+# Node / npm
+# -----------------------
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-lock.yaml
+.yarn
+.yarn-cache
+
+# -----------------------
+# Environment files
+# -----------------------
+.env
+.env.*
+!.env.example
+
+# -----------------------
+# Git
+# -----------------------
+.git
+.gitignore
+
+# -----------------------
+# Docker
+# -----------------------
+Dockerfile
+docker-compose*.yml
+
+# -----------------------
+# Logs
+# -----------------------
+logs
+*.log
+
+# -----------------------
+# OS / Editor
+# -----------------------
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+
+# -----------------------
+# Tests & Coverage
+# -----------------------
+coverage
+__tests__
+*.spec.js
+
+# -----------------------
+# Build artifacts
+# -----------------------
+dist
+build
+
+# -----------------------
+# Local DB / volumes
+# -----------------------
+.neon_local
+postgres-data

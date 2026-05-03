@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #080a0f;
+  --color-foreground: #f0ede8;
+  --color-card: #0e1117;
+  --color-card-foreground: #f0ede8;
+  --color-popover: #0e1117;
+  --color-popover-foreground: #f0ede8;
+  --color-primary: #4ade80;
+  --color-primary-foreground: #080a0f;
+  --color-secondary: #1e2433;
+  --color-secondary-foreground: #f0ede8;
+  --color-muted: #1e2433;
+  --color-muted-foreground: #6b7280;
+  --color-accent: #4ade80;
+  --color-accent-foreground: #080a0f;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #f0ede8;
+  --color-border: rgba(255, 255, 255, 0.06);
+  --color-input: rgba(255, 255, 255, 0.03);
+  --color-ring: rgba(74, 222, 128, 0.3);
+  --radius: 0.25rem;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: 'IBM Plex Mono', monospace;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    opacity: 0.02;
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Playfair Display', serif;
+    font-variant-ligatures: common-ligatures;
+  }
+}
+
+.glass-card {
+  @apply bg-white/3 backdrop-blur-md border border-white/5 shadow-2xl rounded-sm;
+}
+

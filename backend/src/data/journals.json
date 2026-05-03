@@ -1,0 +1,408 @@
+[
+  {
+    "name": "Nature Machine Intelligence",
+    "scope": "Fundamental and applied AI research, machine learning, and their impacts on science and society.",
+    "keywords": [
+      "artificial intelligence",
+      "machine learning",
+      "deep learning",
+      "robotics",
+      "cognitive science",
+      "ai ethics"
+    ],
+    "domain": "Artificial Intelligence",
+    "reputation": 0.92,
+    "venue_type": "journal"
+  },
+  {
+    "name": "Journal of Artificial Intelligence Research (JAIR)",
+    "scope": "All areas of artificial intelligence, including automated reasoning, cognitive modeling, natural language processing, and computer vision.",
+    "keywords": [
+      "artificial intelligence",
+      "automated reasoning",
+      "cognitive modeling",
+      "natural language processing",
+      "computer vision",
+      "machine learning"
+    ],
+    "domain": "Artificial Intelligence",
+    "reputation": 0.88,
+    "venue_type": "journal"
+  },
+  {
+    "name": "IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI)",
+    "scope": "Computer vision, image understanding, pattern analysis, and machine learning.",
+    "keywords": [
+      "computer vision",
+      "pattern recognition",
+      "machine learning",
+      "image processing",
+      "deep learning",
+      "neural networks"
+    ],
+    "domain": "Computer Vision",
+    "reputation": 0.94,
+    "venue_type": "journal"
+  },
+  {
+    "name": "Transactions of the Association for Computational Linguistics (TACL)",
+    "scope": "Natural language processing and computational linguistics.",
+    "keywords": [
+      "natural language processing",
+      "computational linguistics",
+      "nlp",
+      "language models",
+      "machine translation",
+      "text mining"
+    ],
+    "domain": "NLP",
+    "reputation": 0.92,
+    "venue_type": "journal"
+  },
+  {
+    "name": "ACM Transactions on Computer Systems (TOCS)",
+    "scope": "Design, implementation, and evaluation of computer systems, networks, and distributed systems.",
+    "keywords": [
+      "computer systems",
+      "distributed systems",
+      "operating systems",
+      "networks",
+      "cloud computing",
+      "performance evaluation"
+    ],
+    "domain": "Systems",
+    "reputation": 0.85,
+    "venue_type": "journal"
+  },
+  {
+    "name": "IEEE Transactions on Software Engineering (TSE)",
+    "scope": "Software engineering, including requirements, design, testing, and maintenance.",
+    "keywords": [
+      "software engineering",
+      "software testing",
+      "software design",
+      "software maintenance",
+      "agile",
+      "empirical software engineering"
+    ],
+    "domain": "Software Engineering",
+    "reputation": 0.85,
+    "venue_type": "journal"
+  },
+  {
+    "name": "ACM Transactions on Graphics (TOG)",
+    "scope": "Computer graphics, rendering, animation, and geometric modeling.",
+    "keywords": [
+      "computer graphics",
+      "rendering",
+      "animation",
+      "geometric modeling",
+      "virtual reality",
+      "computational photography"
+    ],
+    "domain": "Graphics",
+    "reputation": 0.9,
+    "venue_type": "journal"
+  },
+  {
+    "name": "Bioinformatics",
+    "scope": "Computational biology and bioinformatics.",
+    "keywords": [
+      "bioinformatics",
+      "computational biology",
+      "genomics",
+      "systems biology",
+      "sequence analysis",
+      "structural biology"
+    ],
+    "domain": "Bioinformatics",
+    "reputation": 0.85,
+    "venue_type": "journal"
+  },
+  {
+    "name": "Journal of Machine Learning Research (JMLR)",
+    "scope": "Machine learning, statistical learning theory, and data mining.",
+    "keywords": [
+      "machine learning",
+      "statistical learning",
+      "data mining",
+      "reinforcement learning",
+      "optimization",
+      "deep learning"
+    ],
+    "domain": "Machine Learning",
+    "reputation": 0.92,
+    "venue_type": "journal"
+  },
+  {
+    "name": "IEEE/ACM Transactions on Networking (TON)",
+    "scope": "Computer and communication networks.",
+    "keywords": [
+      "networking",
+      "communication networks",
+      "wireless networks",
+      "internet protocols",
+      "network security",
+      "cloud networking"
+    ],
+    "domain": "Networking",
+    "reputation": 0.82,
+    "venue_type": "journal"
+  },
+  {
+    "name": "Artificial Intelligence in Medicine",
+    "scope": "Application of AI in healthcare, clinical decision support, and medical imaging.",
+    "keywords": [
+      "medical ai",
+      "healthcare",
+      "clinical decision support",
+      "medical imaging",
+      "health informatics",
+      "predictive modeling"
+    ],
+    "domain": "Medical AI",
+    "reputation": 0.78,
+    "venue_type": "journal"
+  },
+  {
+    "name": "ACM Transactions on Information Systems (TOIS)",
+    "scope": "Information retrieval, search engines, and recommender systems.",
+    "keywords": [
+      "information retrieval",
+      "search engines",
+      "recommender systems",
+      "text mining",
+      "user behavior",
+      "web search"
+    ],
+    "domain": "Information Retrieval",
+    "reputation": 0.8,
+    "venue_type": "journal"
+  },
+  {
+    "name": "IEEE Transactions on Information Forensics and Security (TIFS)",
+    "scope": "Information security, cryptography, and forensics.",
+    "keywords": [
+      "security",
+      "cryptography",
+      "forensics",
+      "privacy",
+      "cybersecurity",
+      "network security"
+    ],
+    "domain": "Security",
+    "reputation": 0.82,
+    "venue_type": "journal"
+  },
+  {
+    "name": "Journal of Computer Security",
+    "scope": "Computer security, access control, and formal methods in security.",
+    "keywords": [
+      "computer security",
+      "access control",
+      "formal methods",
+      "authentication",
+      "system security",
+      "vulnerability analysis"
+    ],
+    "domain": "Security",
+    "reputation": 0.75,
+    "venue_type": "journal"
+  },
+  {
+    "name": "International Journal of Robotics Research (IJRR)",
+    "scope": "Robotics, kinematics, dynamics, and robot control.",
+    "keywords": [
+      "robotics",
+      "kinematics",
+      "dynamics",
+      "robot control",
+      "human-robot interaction",
+      "autonomous vehicles"
+    ],
+    "domain": "Robotics",
+    "reputation": 0.9,
+    "venue_type": "journal"
+  },
+  {
+    "name": "ACM Transactions on Human-Computer Interaction (TOCHI)",
+    "scope": "Human-computer interaction, user interfaces, and usability.",
+    "keywords": [
+      "human-computer interaction",
+      "user interfaces",
+      "usability",
+      "user experience",
+      "accessible computing",
+      "interaction design"
+    ],
+    "domain": "HCI",
+    "reputation": 0.8,
+    "venue_type": "journal"
+  },
+  {
+    "name": "Data Mining and Knowledge Discovery",
+    "scope": "Data mining algorithms, machine learning for data mining, and big data analytics.",
+    "keywords": [
+      "data mining",
+      "knowledge discovery",
+      "big data",
+      "predictive analytics",
+      "pattern discovery",
+      "clustering"
+    ],
+    "domain": "Data Mining",
+    "reputation": 0.8,
+    "venue_type": "journal"
+  },
+  {
+    "name": "IEEE Transactions on Parallel and Distributed Systems (TPDS)",
+    "scope": "Parallel computing, distributed algorithms, and grid computing.",
+    "keywords": [
+      "parallel computing",
+      "distributed computing",
+      "cloud computing",
+      "grid computing",
+      "multiprocessing",
+      "distributed algorithms"
+    ],
+    "domain": "Systems",
+    "reputation": 0.82,
+    "venue_type": "journal"
+  },
+  {
+    "name": "ACM Transactions on Database Systems (TODS)",
+    "scope": "Database systems, data models, query processing, and transaction management.",
+    "keywords": [
+      "database systems",
+      "query processing",
+      "transaction management",
+      "data models",
+      "distributed databases",
+      "nosql"
+    ],
+    "domain": "Databases",
+    "reputation": 0.82,
+    "venue_type": "journal"
+  },
+  {
+    "name": "Computer Networks",
+    "scope": "Computer networking and telecommunications.",
+    "keywords": [
+      "computer networks",
+      "telecommunications",
+      "network protocols",
+      "network architecture",
+      "routing",
+      "network performance"
+    ],
+    "domain": "Networking",
+    "reputation": 0.75,
+    "venue_type": "journal"
+  },
+  {
+    "name": "Journal of Neural-Symbolic Computing",
+    "scope": "Integration of neural networks and symbolic logic, hybrid AI models, and interpretable deep learning.",
+    "keywords": [
+      "neural-symbolic ai",
+      "logical reasoning",
+      "transformers",
+      "explainable ai",
+      "deep learning",
+      "symbolic logic",
+      "robustness"
+    ],
+    "domain": "Artificial Intelligence",
+    "reputation": 0.72,
+    "venue_type": "journal"
+  },
+  {
+    "name": "Conference on Neural Information Processing Systems (NeurIPS)",
+    "scope": "Machine learning, neural networks, deep learning, and their mathematical foundations. The premier venue for foundational and applied advances in AI.",
+    "keywords": [
+      "deep learning",
+      "neural networks",
+      "machine learning",
+      "optimization",
+      "generative models",
+      "reinforcement learning",
+      "transformers",
+      "attention mechanism",
+      "sequence modeling"
+    ],
+    "domain": "Machine Learning",
+    "reputation": 0.98,
+    "venue_type": "conference"
+  },
+  {
+    "name": "International Conference on Machine Learning (ICML)",
+    "scope": "All aspects of machine learning, including theory, algorithms, and applications. Covers optimization, probabilistic methods, and deep architectures.",
+    "keywords": [
+      "machine learning",
+      "deep learning",
+      "optimization",
+      "generalization",
+      "neural architecture",
+      "self-attention",
+      "sequence-to-sequence",
+      "language modeling",
+      "representation learning"
+    ],
+    "domain": "Machine Learning",
+    "reputation": 0.97,
+    "venue_type": "conference"
+  },
+  {
+    "name": "International Conference on Learning Representations (ICLR)",
+    "scope": "Deep learning and representation learning, including novel architectures, training techniques, and theoretical analysis.",
+    "keywords": [
+      "representation learning",
+      "deep learning",
+      "transformers",
+      "self-supervised learning",
+      "attention",
+      "language models",
+      "neural architecture search",
+      "pre-training",
+      "fine-tuning"
+    ],
+    "domain": "Machine Learning",
+    "reputation": 0.96,
+    "venue_type": "conference"
+  },
+  {
+    "name": "Association for Computational Linguistics (ACL)",
+    "scope": "Natural language processing and computational linguistics research, including parsing, machine translation, language generation, and semantics.",
+    "keywords": [
+      "natural language processing",
+      "machine translation",
+      "attention mechanism",
+      "encoder-decoder",
+      "sequence transduction",
+      "language understanding",
+      "neural machine translation",
+      "bert",
+      "transformers"
+    ],
+    "domain": "NLP",
+    "reputation": 0.96,
+    "venue_type": "conference"
+  },
+  {
+    "name": "Empirical Methods in Natural Language Processing (EMNLP)",
+    "scope": "Empirical and data-driven approaches to natural language processing, including neural models for translation, summarization, and language understanding.",
+    "keywords": [
+      "natural language processing",
+      "empirical nlp",
+      "neural translation",
+      "attention",
+      "language models",
+      "text generation",
+      "question answering",
+      "summarization",
+      "sequence-to-sequence"
+    ],
+    "domain": "NLP",
+    "reputation": 0.95,
+    "venue_type": "conference"
+  }
+]
