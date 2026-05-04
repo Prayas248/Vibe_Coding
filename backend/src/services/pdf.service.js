@@ -2,6 +2,42 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
 
+// Polyfills for pdfjs-dist in Node.js (it expects browser APIs)
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  globalThis.DOMMatrix = class DOMMatrix {
+    constructor(init) {
+      const values = init && Array.isArray(init) ? init : [1, 0, 0, 1, 0, 0];
+      this.a = values[0]; this.b = values[1]; this.c = values[2];
+      this.d = values[3]; this.e = values[4]; this.f = values[5];
+    }
+    isIdentity = true;
+    translate() { return new DOMMatrix(); }
+    scale() { return new DOMMatrix(); }
+    inverse() { return new DOMMatrix(); }
+    multiply() { return new DOMMatrix(); }
+  };
+}
+if (typeof globalThis.Path2D === 'undefined') {
+  globalThis.Path2D = class Path2D {
+    constructor() {}
+    addPath() {}
+    moveTo() {}
+    lineTo() {}
+    closePath() {}
+    rect() {}
+    arc() {}
+    bezierCurveTo() {}
+    quadraticCurveTo() {}
+  };
+}
+if (typeof globalThis.ImageData === 'undefined') {
+  globalThis.ImageData = class ImageData {
+    constructor(data, width, height) {
+      this.data = data; this.width = width; this.height = height;
+    }
+  };
+}
+
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import logger from '../config/logger.js';
 
