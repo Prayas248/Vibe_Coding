@@ -6,8 +6,12 @@ import logger from './config/logger.js';
 import { buildVenueCache } from './services/venue-discovery.service.js';
 
 const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0';
 
-const server = app.listen(PORT, () => {
+console.log(`[SERVER] Attempting to bind to ${HOST}:${PORT}`);
+
+const server = app.listen(PORT, HOST, () => {
+  console.log(`[SERVER] Successfully listening on ${HOST}:${PORT}`);
   logger.info(`Server running on port ${PORT}`);
 
   // Load vector index (sync, fast — just reads files)
