@@ -38,7 +38,19 @@ if (typeof globalThis.ImageData === 'undefined') {
   };
 }
 
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+// Lazy-load pdfjs-dist to prevent startup crash if polyfills aren't sufficient
+let pdfjsLib = null;
+async function getPdfjsLib() {
+  if (pdfjsLib) return pdfjsLib;
+  try {
+    pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    return pdfjsLib;
+  } catch (err) {
+    console.error('[PDF] pdfjs-dist failed to load:', err.message);
+    return null;
+  }
+}
+
 import logger from '../config/logger.js';
 
 export class PdfService {
@@ -70,13 +82,19 @@ export class PdfService {
 
   static async extractTextLayoutAware(buffer) {
     try {
-      // Set worker source for Node.js (uses the top-level require already declared)
-      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs');
+      const pdfjs = await getPdfjsLib();
+      if (!pdfjs) {
+        logger.warn('pdfjs-dist unavailable, skipping layout-aware extraction');
+        return '';
+      }
+
+      // Set worker source for Node.js
+      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+        pdfjs.GlobalWorkerOptions.workerSrc = require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs');
       }
 
       const data = new Uint8Array(buffer);
-      const loadingTask = pdfjsLib.getDocument({
+      const loadingTask = pdfjs.getDocument({
         data,
         useWorkerFetch: false,
         isEvalSupported: false,
