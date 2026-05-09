@@ -2,6 +2,9 @@ import express from 'express';
 import multer from 'multer';
 import { analyzePaper } from '../controllers/analyze.controller.js';
 import { progressEmitter } from '../utils/progressEmitter.js';
+import { requireAuth } from '../middleware/auth.middleware.js';
+import { arcjetGuard } from '../middleware/arcjet.middleware.js';
+import { arcjetAnalyze } from '../config/arcjet.js';
 
 const router = express.Router();
 
@@ -41,7 +44,7 @@ try {
   console.error('[MULTER INIT ERROR]', err.message);
 }
 
-router.post('/', (req, res, next) => {
+router.post('/', requireAuth, arcjetGuard(arcjetAnalyze), (req, res, next) => {
   if (upload) {
     upload.single('file')(req, res, next);
   } else {

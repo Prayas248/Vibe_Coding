@@ -8,6 +8,7 @@ import { VectorStoreService } from '../services/vector-store.service.js';
 import { getEliteVenuesForDomain } from '../services/venue-discovery.service.js';
 import { extractKeywordsLocal } from '../utils/keywordExtractor.js';
 import { progressEmitter } from '../utils/progressEmitter.js';
+import { HistoryService } from '../services/history.service.js';
 import logger from '../config/logger.js';
 
 export const analyzePaper = async (req, res, next) => {
@@ -286,7 +287,7 @@ export const analyzePaper = async (req, res, next) => {
       console.log(`[FOCUS-CHECK] ${j.name} → ${j.focusScore}`);
     });
 
-    res.json({
+    const responsePayload = {
       features: {
         summary: (extractedFeatures.summary || '').replace('[Quota fallback] ', ''),
         domain: extractedFeatures.domain,
@@ -299,7 +300,23 @@ export const analyzePaper = async (req, res, next) => {
         timings,
         totalTime
       }
-    });
+    };
+
+    let savedId = null;
+    if (req.user?.id) {
+      try {
+        const saved = await HistoryService.save(
+          req.user.id,
+          responsePayload,
+          req.file?.originalname || null
+        );
+        savedId = saved?.id ?? null;
+      } catch (saveErr) {
+        logger.warn(`[HISTORY] save skipped: ${saveErr.message}`);
+      }
+    }
+
+    res.json({ id: savedId, ...responsePayload });
 
   } catch (error) {
     console.error('[CONTROLLER CRASH]', error.message);

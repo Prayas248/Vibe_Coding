@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import StarMap from '../components/StarMap';
+import UserMenu from '../components/UserMenu';
+import { useAuth } from '../context/AuthContext';
 import '../Landing.css';
 
 const PipelineCard = ({ number, title, desc, badges }) => {
@@ -40,6 +42,7 @@ const PipelineCard = ({ number, title, desc, badges }) => {
 
 export default function Landing() {
   const [scrolled, setScrolled] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -81,7 +84,18 @@ export default function Landing() {
         </div>
         <div className="nav-right">
           <button onClick={scrollToPipeline} className="nav-link">How it works</button>
-          <Link to="/analyze" className="btn-nav">Try Orbis</Link>
+          {user ? (
+            <>
+              <Link to="/dashboard" className="nav-link">Dashboard</Link>
+              <Link to="/analyze" className="btn-nav">Analyze</Link>
+              <UserMenu />
+            </>
+          ) : (
+            <>
+              <Link to="/login" className="nav-link">Sign in</Link>
+              <Link to="/signup" className="btn-nav">Get started</Link>
+            </>
+          )}
         </div>
       </nav>
 
@@ -97,8 +111,8 @@ export default function Landing() {
           Upload your abstract. In seconds, Orbis surfaces the journals and conferences most likely to accept your work.
         </p>
         <div className="cta-group animate-in delay-600">
-          <Link to="/analyze" className="btn-primary">
-            → Analyze Your Paper
+          <Link to={user ? '/analyze' : '/signup'} className="btn-primary">
+            → {user ? 'Analyze Your Paper' : 'Get Started'}
           </Link>
           <button onClick={scrollToPipeline} className="btn-ghost" style={{ padding: '0.75rem 2rem' }}>
             ↓ How it works
@@ -211,8 +225,8 @@ export default function Landing() {
 
       <footer className="cta-footer">
         <h2>Your research deserves the right audience.</h2>
-        <Link to="/analyze" className="btn-primary btn-large">
-          → Open Orbis
+        <Link to={user ? '/analyze' : '/signup'} className="btn-primary btn-large">
+          → {user ? 'Open Orbis' : 'Create your account'}
         </Link>
         <div className="cta-footer-meta">
           <div className="footer-col">

@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cors from 'cors';
 import analyzeRoutes from './routes/analyze.route.js';
+import historyRoutes from './routes/history.route.js';
 import { errorHandler } from './middleware/error.middleware.js';
 
 const app = express();
@@ -56,6 +57,7 @@ app.get('/health', (req, res) => {
   });
 });
 app.use('/analyze', analyzeRoutes);
+app.use('/history', historyRoutes);
 
 app.use((req, res) => {
   res.status(404).send({ error: 'Route not found' });

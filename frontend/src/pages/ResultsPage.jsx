@@ -1,22 +1,90 @@
-import { useState } from 'react';
-import { Target, Zap, CheckCircle, AlertTriangle, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import {
+  Target,
+  Zap,
+  CheckCircle,
+  AlertTriangle,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+} from 'lucide-react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { api } from '../lib/api';
 
 export default function ResultsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [expandedJournal, setExpandedJournal] = useState(0);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const rawResult = sessionStorage.getItem(`orbis_result_${id}`);
-  const result = rawResult ? JSON.parse(rawResult) : null;
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
 
-  if (!result || !result.topJournals || !Array.isArray(result.topJournals)) {
+    const cached = sessionStorage.getItem(`orbis_result_${id}`);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed?.topJournals) {
+          setResult(parsed);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // fall through to API
+      }
+    }
+
+    api
+      .getHistoryItem(id)
+      .then((row) => {
+        if (cancelled) return;
+        if (!row?.result) {
+          setError('Analysis not found.');
+        } else {
+          setResult({ ...row.result, fileName: row.file_name });
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || 'Failed to load analysis.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-white/60 mono-label text-xs tracking-widest uppercase gap-3">
+        <Loader2 className="animate-spin" size={16} /> Loading analysis...
+      </div>
+    );
+  }
+
+  if (error || !result || !result.topJournals || !Array.isArray(result.topJournals)) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="text-center space-y-4">
-          <h2 className="text-2xl font-bold text-white">Session Expired</h2>
-          <p className="text-muted-foreground">This session has expired or the link is invalid.</p>
-          <Link to="/analyze" className="inline-block mt-4 px-6 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-lg transition-colors">
+          <h2 className="text-2xl font-bold text-white">
+            {error || 'Session Expired'}
+          </h2>
+          <p className="text-muted-foreground">
+            {error
+              ? 'We could not load this analysis.'
+              : 'This session has expired or the link is invalid.'}
+          </p>
+          <Link
+            to="/analyze"
+            className="inline-block mt-4 px-6 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-lg transition-colors"
+          >
             ← Start a new analysis
           </Link>
         </div>
@@ -33,16 +101,24 @@ export default function ResultsPage() {
             <FileText size={16} /> {result.fileName || 'document.pdf'}
           </p>
         </div>
-        <button 
-          onClick={() => navigate('/analyze')}
-          className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors border border-white/10 text-sm font-medium text-white"
-        >
-          Analyze New Paper
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/dashboard"
+            className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors border border-white/10 text-sm font-medium text-white"
+          >
+            Dashboard
+          </Link>
+          <button
+            onClick={() => navigate('/analyze')}
+            className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors border border-white/10 text-sm font-medium text-white"
+          >
+            Analyze New Paper
+          </button>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
+
         {/* Left Column: Readiness, Issues, Suggestions */}
         <div className="space-y-8 lg:col-span-1">
           {/* Readiness Score */}
@@ -53,17 +129,17 @@ export default function ResultsPage() {
             <h2 className="text-xl font-semibold mb-6 flex items-center gap-2 text-white">
               <Zap className="text-yellow-400" size={20} /> Readiness Score
             </h2>
-            
+
             <div className="flex flex-col items-center justify-center py-4">
               <div className="relative w-32 h-32 flex items-center justify-center rounded-full border-8 border-white/5 mb-4 group-hover:scale-105 transition-transform duration-500">
                 <svg className="absolute inset-0 w-full h-full -rotate-90">
-                  <circle 
-                    cx="50%" cy="50%" r="46%" 
+                  <circle
+                    cx="50%" cy="50%" r="46%"
                     fill="none" stroke="currentColor" strokeWidth="8"
                     className="text-white/5"
                   />
-                  <circle 
-                    cx="50%" cy="50%" r="46%" 
+                  <circle
+                    cx="50%" cy="50%" r="46%"
                     fill="none" stroke="currentColor" strokeWidth="8"
                     strokeDasharray="289"
                     strokeDashoffset={289 - (289 * (result.readinessScore.overall / 100))}
@@ -77,10 +153,10 @@ export default function ResultsPage() {
                   {result.readinessScore.overall}%
                 </span>
               </div>
-              
+
               <span className={`px-4 py-1 rounded-full text-sm font-semibold uppercase tracking-wider mb-6 ${
                 result.readinessScore.acceptanceLevel === 'High' ? 'bg-green-500/20 text-green-400 border border-green-500/20' :
-                result.readinessScore.acceptanceLevel === 'Medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' : 
+                result.readinessScore.acceptanceLevel === 'Medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' :
                 'bg-red-500/20 text-red-400 border border-red-500/20'
               }`}>
                 {result.readinessScore.acceptanceLevel} Fit
@@ -95,7 +171,7 @@ export default function ResultsPage() {
                       <span className="text-white/70">{val}%</span>
                     </div>
                       <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                        <div 
+                        <div
                           className={`h-full transition-all duration-1000 ease-out ${
                             val >= 60 ? 'bg-primary' : val >= 35 ? 'bg-yellow-500' : 'bg-red-500'
                           }`}
@@ -140,7 +216,7 @@ export default function ResultsPage() {
         {/* Right Column: Journal Matches */}
         <div className="lg:col-span-2 space-y-6">
           <h2 className="text-2xl font-semibold mb-2 text-white">Top Journal Matches</h2>
-          
+
           <div className="flex flex-wrap gap-2 mb-6">
             <span className="text-xs font-medium bg-primary/10 text-primary px-3 py-1 rounded-full border border-primary/20">
               Domain: {result.features?.domain || 'Unknown'}
@@ -155,7 +231,7 @@ export default function ResultsPage() {
           <div className="space-y-4">
             {result.topJournals.filter(Boolean).map((journal, idx) => (
               <div key={idx} className={`glass-card overflow-hidden transition-all duration-300 ${expandedJournal === idx ? 'ring-1 ring-primary/50' : 'hover:bg-white/10'}`}>
-                <div 
+                <div
                   className="p-5 cursor-pointer flex justify-between items-center"
                   onClick={() => setExpandedJournal(expandedJournal === idx ? -1 : idx)}
                 >
@@ -169,7 +245,7 @@ export default function ResultsPage() {
                     <div className="text-right hidden sm:block">
                       <div className="text-sm font-bold text-primary">{Math.round((journal.displayScore || journal.score) * 100)}% Match</div>
                       <div className="text-xs text-muted-foreground mb-3">Hybrid Score</div>
-                      
+
                       {journal.focusScore != null && (
                         <div className="flex flex-col items-end gap-1">
                           <span className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full border ${
@@ -192,7 +268,7 @@ export default function ResultsPage() {
                     </div>
                   </div>
                 </div>
-                
+
                 {expandedJournal === idx && (
                   <div className="px-5 pb-5 pt-2 border-t border-white/10 text-sm animate-in slide-in-from-top-2 duration-300">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
@@ -200,7 +276,7 @@ export default function ResultsPage() {
                         <h4 className="font-medium text-white mb-2">Why it fits</h4>
                         <p className="text-muted-foreground bg-white/5 p-3 rounded-lg">{journal?.explanation?.fitReason ?? 'No explanation available.'}</p>
                       </div>
-                      
+
                       <div className="space-y-4">
                         {journal?.explanation?.risks?.length > 0 && (
                           <div>
@@ -210,7 +286,7 @@ export default function ResultsPage() {
                             </ul>
                           </div>
                         )}
-                        
+
                         {journal?.explanation?.suggestions?.length > 0 && (
                           <div>
                             <h4 className="font-medium text-green-400 mb-2">How to improve fit</h4>

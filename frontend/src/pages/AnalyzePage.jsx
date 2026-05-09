@@ -4,6 +4,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import StarMap from '../components/StarMap';
 import ProgressSteps from '../components/ProgressSteps';
+import UserMenu from '../components/UserMenu';
+import { useAuth } from '../context/AuthContext';
 import '../Landing.css';
 
 export default function AnalyzePage() {
@@ -13,6 +15,7 @@ export default function AnalyzePage() {
   const [progressSessionId, setProgressSessionId] = useState(null);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
+  const { accessToken } = useAuth();
 
   useEffect(() => {
     document.body.classList.add('landing-page');
@@ -67,20 +70,32 @@ export default function AnalyzePage() {
         body: formData,
         headers: {
           'X-Session-Id': trackingId,
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
       });
 
       if (!res.ok) {
-        throw new Error(`Server error (${res.status})`);
+        let detail = `Server error (${res.status})`;
+        try {
+          const body = await res.json();
+          if (body?.error) detail = body.error;
+          if (res.status === 429 && body?.retryAfter) {
+            const mins = Math.ceil(body.retryAfter / 60);
+            detail = `${body.error} (retry in ~${mins} min)`;
+          }
+        } catch {
+          // body not JSON — keep generic message
+        }
+        throw new Error(detail);
       }
 
       const data = await res.json();
-      const sessionId = uuidv4();
-      sessionStorage.setItem(`orbis_result_${sessionId}`, JSON.stringify({
+      const resultId = data?.id || uuidv4();
+      sessionStorage.setItem(`orbis_result_${resultId}`, JSON.stringify({
         ...data,
         fileName: file.name
       }));
-      navigate(`/results/${sessionId}`);
+      navigate(`/results/${resultId}`);
     } catch (err) {
       console.error(err);
       setError(err.message || 'An unexpected error occurred.');
@@ -102,7 +117,7 @@ export default function AnalyzePage() {
         </div>
         <div className="nav-right">
           <Link to="/" className="nav-link">Home</Link>
-          <button className="nav-link">Documentation</button>
+          <UserMenu />
         </div>
       </nav>
 
