@@ -15,7 +15,7 @@ const baseClient = (rules) =>
     rules,
   });
 
-// Heavy endpoint: 5 full analyses per hour per user.
+// Heavy endpoint: 30 analyses per hour per user, with a burst capacity of 10.
 // Shield + bot detection because PDF upload is the most abuse-prone surface.
 export const arcjetAnalyze = baseClient([
   shield({ mode: 'LIVE' }),
@@ -25,19 +25,19 @@ export const arcjetAnalyze = baseClient([
   }),
   tokenBucket({
     mode: 'LIVE',
-    refillRate: 5,
+    refillRate: 30,
     interval: 3600,
-    capacity: 5,
+    capacity: 10,
   }),
 ]);
 
-// Lightweight read endpoints: 60 requests per minute per user.
+// Lightweight read endpoints: 200 requests per minute per user.
 // No bot rule — these are normal app reads; bot detection would be noisy.
 export const arcjetHistory = baseClient([
   shield({ mode: 'LIVE' }),
   slidingWindow({
     mode: 'LIVE',
     interval: 60,
-    max: 60,
+    max: 200,
   }),
 ]);
